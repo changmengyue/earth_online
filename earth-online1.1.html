@@ -1,0 +1,2091 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地球online · 系统终端</title>
+<style>
+/* ============================================================
+   CSS 变量定义 - 主题色系
+   ============================================================ */
+:root {
+  --bg-deep: #06080d;
+  --bg-panel: rgba(4, 8, 18, 0.88);
+  --cyan: #00ffcc;
+  --cyan-dim: rgba(0, 255, 204, 0.25);
+  --green: #00ff41;
+  --green-dim: rgba(0, 255, 65, 0.3);
+  --red: #ff4d4d;
+  --red-dim: rgba(255, 77, 77, 0.3);
+  --gold: #ffb847;
+  --gold-dim: rgba(255, 184, 71, 0.3);
+  --white-dim: rgba(200, 220, 240, 0.6);
+  --font-mono: 'Courier New', 'Consolas', 'Monaco', 'Liberation Mono', monospace;
+  --glow-cyan: 0 0 12px rgba(0, 255, 204, 0.4), 0 0 30px rgba(0, 255, 204, 0.15);
+  --glow-red: 0 0 12px rgba(255, 77, 77, 0.5), 0 0 30px rgba(255, 77, 77, 0.2);
+  --glow-gold: 0 0 14px rgba(255, 184, 71, 0.5), 0 0 35px rgba(255, 184, 71, 0.2);
+}
+
+/* ============================================================
+   基础重置 & 全局样式
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; min-height: 100vh;
+  background: var(--bg-deep);
+  font-family: var(--font-mono);
+  color: #c8dceb;
+  overflow-x: hidden;
+  cursor: crosshair;
+}
+
+/* ============================================================
+   背景层 - 星空画布
+   ============================================================ */
+#starfield {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  will-change: contents; /* 性能优化: 提示浏览器该元素频繁重绘 */
+}
+#minimapCanvas {
+  will-change: contents; /* 性能优化: 小地图Canvas频繁更新 */
+}
+
+/* ============================================================
+   CRT 扫描线覆盖层
+   ============================================================ */
+.scanlines {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 1; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  animation: scanline-move 8s linear infinite;
+}
+@keyframes scanline-move {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 4px; }
+}
+
+/* ============================================================
+   晕影效果 (Vignette)
+   ============================================================ */
+.vignette {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 1; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.75) 100%);
+}
+
+/* ============================================================
+   CRT 闪烁层
+   ============================================================ */
+.crt-flicker {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 2; pointer-events: none;
+  background: rgba(255, 255, 255, 0.012);
+  animation: flicker 4s infinite alternate; /* 性能优化: 0.15s→4s, 减少高频重绘 */
+  opacity: 0.3;
+}
+@keyframes flicker {
+  0% { opacity: 0.25; }
+  50% { opacity: 0.35; }
+  100% { opacity: 0.25; }
+}
+
+/* ============================================================
+   故障艺术覆盖层
+   ============================================================ */
+.glitch-overlay {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 3; pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.05s;
+}
+.glitch-overlay.active {
+  opacity: 1;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%, transparent 30%,
+    rgba(0, 255, 204, 0.06) 30%, rgba(0, 255, 204, 0.04) 32%, transparent 32%,
+    transparent 55%,
+    rgba(255, 77, 77, 0.05) 55%, rgba(255, 77, 77, 0.03) 58%, transparent 58%,
+    transparent 75%,
+    rgba(0, 255, 204, 0.05) 75%, rgba(0, 255, 204, 0.03) 78%, transparent 78%
+  );
+  animation: glitch-shift 0.2s ease-out;
+}
+@keyframes glitch-shift {
+  0% { transform: translateX(0); }
+  10% { transform: translateX(8px); }
+  20% { transform: translateX(-6px); }
+  35% { transform: translateX(4px); }
+  50% { transform: translateX(-3px); }
+  70% { transform: translateX(2px); }
+  100% { transform: translateX(0); }
+}
+
+/* ============================================================
+   主容器 - 终端面板
+   ============================================================ */
+.terminal-wrapper {
+  position: relative; z-index: 10;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; padding: 40px 20px;
+}
+
+.terminal-panel {
+  position: relative;
+  width: 100%; max-width: 680px;
+  padding: 36px 40px 32px;
+  background: var(--bg-panel);
+  border: 1px solid var(--cyan-dim);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 60px rgba(0, 255, 204, 0.04),
+    0 0 20px rgba(0, 255, 204, 0.12),
+    0 0 60px rgba(0, 255, 204, 0.06);
+  transition: transform 0.3s ease-out;
+  backdrop-filter: blur(2px);
+  overflow: hidden;
+  will-change: transform; /* 性能优化: 鼠标视差频繁修改transform */
+}
+
+/* 面板辉光边框动画 */
+.terminal-panel::before {
+  content: '';
+  position: absolute; top: -1px; left: -1px; right: -1px; bottom: -1px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: linear-gradient(
+    135deg,
+    var(--cyan-dim),
+    transparent 30%,
+    transparent 70%,
+    var(--cyan-dim)
+  ) border-box;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.5;
+  animation: border-shimmer 4s linear infinite;
+  animation-play-state: paused; /* 性能优化: 默认暂停，hover时播放 */
+  pointer-events: none; z-index: -1;
+}
+.terminal-panel:hover::before {
+  animation-play-state: running;
+}
+@keyframes border-shimmer {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+  100% { opacity: 0.3; }
+}
+
+/* 面板顶部扫描线 */
+.terminal-panel::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 1px;
+  background: var(--cyan);
+  opacity: 0;
+  animation: panel-scan 3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes panel-scan {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 0.6; }
+  30% { opacity: 0.1; }
+  50% { top: 100%; opacity: 0.5; }
+  70% { opacity: 0.1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* ============================================================
+   角落 HUD 装饰
+   ============================================================ */
+.hud-corner {
+  position: absolute;
+  font-size: 9px;
+  color: rgba(0, 255, 204, 0.45);
+  letter-spacing: 1px;
+  pointer-events: none;
+  z-index: 1;
+}
+.hud-tl { top: 10px; left: 14px; }
+.hud-tr { top: 10px; right: 14px; text-align: right; }
+.hud-bl { bottom: 10px; left: 14px; }
+.hud-br { bottom: 10px; right: 14px; text-align: right; }
+.hud-corner .label { color: rgba(0, 255, 204, 0.3); }
+.hud-corner .value { color: rgba(0, 255, 204, 0.55); }
+.hud-corner .blink-dot {
+  display: inline-block; width: 5px; height: 5px;
+  background: var(--green); border-radius: 50%;
+  margin-right: 3px; vertical-align: middle;
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green); }
+  50% { opacity: 0.3; box-shadow: 0 0 1px var(--green); }
+}
+
+/* ============================================================
+   启动日志区域
+   ============================================================ */
+.boot-log {
+  margin-bottom: 20px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border-left: 2px solid rgba(0, 255, 204, 0.15);
+  border-radius: 2px;
+  min-height: 20px;
+  opacity: 0.8;
+}
+.boot-log .log-line {
+  font-size: 11px;
+  color: rgba(0, 255, 204, 0.6);
+  line-height: 1.7;
+  display: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.boot-log .log-line.visible { display: block; }
+.boot-log .log-line .prompt { color: var(--green); margin-right: 6px; }
+.boot-log .log-line .ok { color: var(--green); margin-left: 8px; }
+.boot-log .log-cursor {
+  display: inline-block; width: 7px; height: 13px;
+  background: var(--cyan); vertical-align: middle;
+  animation: cursor-blink 0.8s step-end infinite;
+}
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 启动日志淡出 */
+.boot-log.fade-out {
+  opacity: 0;
+  max-height: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-left-width: 0;
+  min-height: 0;
+  transition: opacity 0.5s ease, max-height 0.5s ease 0.15s, margin 0.5s ease 0.15s, padding 0.5s ease 0.15s;
+  overflow: hidden;
+}
+
+/* ============================================================
+   标题区域
+   ============================================================ */
+.sys-header {
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 255, 204, 0.15);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.sys-header.visible { opacity: 1; transform: translateY(0); }
+.sys-header .sys-tag {
+  display: inline-block;
+  font-size: 10px; font-weight: bold;
+  color: var(--bg-deep); background: var(--cyan);
+  padding: 2px 8px; border-radius: 2px;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  animation: tag-pulse 2s ease-in-out infinite;
+}
+@keyframes tag-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(0, 255, 204, 0.5); }
+  50% { box-shadow: 0 0 16px rgba(0, 255, 204, 0.8); }
+}
+.sys-header .title {
+  font-size: 20px; font-weight: bold;
+  color: var(--cyan);
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px rgba(0, 255, 204, 0.5), 0 0 20px rgba(0, 255, 204, 0.2);
+}
+.sys-header .title .prefix { color: var(--green); margin-right: 6px; }
+.sys-header .title-underline {
+  display: block; width: 0; height: 1px;
+  background: var(--cyan);
+  margin-top: 6px;
+  transition: width 1s ease-out 0.3s;
+}
+.sys-header.visible .title-underline { width: 100%; }
+
+/* ============================================================
+   内容区域通用
+   ============================================================ */
+.content-section {
+  margin-bottom: 18px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.content-section.visible { opacity: 1; transform: translateY(0); }
+
+/* ============================================================
+   人生进度 - 圆形进度环
+   ============================================================ */
+.life-section {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.life-section .section-label {
+  font-size: 12px; color: rgba(0, 255, 204, 0.5);
+  letter-spacing: 2px; margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.progress-ring-container {
+  position: relative;
+  display: inline-block;
+  width: 200px; height: 200px;
+}
+.progress-ring-container svg {
+  width: 100%; height: 100%;
+  transform: rotate(-90deg);
+}
+.progress-ring__track {
+  fill: none; stroke: rgba(0, 255, 204, 0.08); stroke-width: 6;
+}
+.progress-ring__glow {
+  fill: none; stroke: var(--cyan); stroke-width: 14;
+  stroke-linecap: round; opacity: 0.2;
+  filter: blur(4px);
+  transition: stroke-dashoffset 2.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.progress-ring__arc {
+  fill: none; stroke: var(--cyan); stroke-width: 5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 2.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.progress-ring__center-text {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+.progress-ring__center-text .number {
+  font-size: 42px; font-weight: bold;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0, 255, 204, 0.6), 0 0 25px rgba(0, 255, 204, 0.25);
+  line-height: 1;
+}
+.progress-ring__center-text .unit {
+  font-size: 14px; color: rgba(0, 255, 204, 0.5);
+  vertical-align: super;
+}
+.progress-ring__center-text .sub-label {
+  font-size: 10px; color: rgba(0, 255, 204, 0.4);
+  letter-spacing: 2px; margin-top: 2px;
+}
+
+/* ============================================================
+   警告区域 - 辅助系统已终止
+   ============================================================ */
+.warning-section {
+  padding: 14px 16px;
+  border: 1px solid var(--red-dim);
+  border-radius: 3px;
+  background: rgba(255, 77, 77, 0.05);
+  display: flex; align-items: center; gap: 12px;
+  animation: none;
+}
+.warning-section.active {
+  animation: warning-pulse 2s ease-in-out infinite;
+}
+@keyframes warning-pulse {
+  0%, 100% { border-color: var(--red-dim); box-shadow: 0 0 6px rgba(255, 77, 77, 0.15); }
+  50% { border-color: rgba(255, 77, 77, 0.6); box-shadow: 0 0 18px rgba(255, 77, 77, 0.35); }
+}
+.warning-icon {
+  font-size: 28px; flex-shrink: 0;
+  animation: warn-shake 0.5s ease-in-out infinite;
+}
+@keyframes warn-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+.warning-text {
+  font-size: 13px; font-weight: bold;
+  color: var(--red);
+  letter-spacing: 1px;
+  text-shadow: 0 0 8px rgba(255, 77, 77, 0.5);
+}
+.warning-sub {
+  font-size: 10px; color: rgba(255, 77, 77, 0.55);
+  margin-top: 2px; letter-spacing: 0.5px;
+}
+
+/* ============================================================
+   横向进度条组件
+   ============================================================ */
+.progress-bar-group {
+  margin-bottom: 6px;
+}
+.progress-bar-group .pb-label {
+  font-size: 12px; color: rgba(200, 220, 240, 0.7);
+  letter-spacing: 1px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.progress-bar-group .pb-label .icon {
+  font-size: 14px; flex-shrink: 0;
+}
+.progress-bar-group .pb-label .pb-percent {
+  margin-left: auto;
+  font-weight: bold;
+  font-size: 13px;
+}
+.progress-bar-track {
+  width: 100%; height: 8px;
+  background: rgba(0, 255, 204, 0.06);
+  border-radius: 4px; overflow: hidden;
+  position: relative;
+}
+.progress-bar-fill {
+  height: 100%; width: 0%;
+  border-radius: 4px;
+  transition: width 1.8s cubic-bezier(0.22, 0.61, 0.36, 1);
+  position: relative;
+}
+.progress-bar-fill::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 50%, transparent 100%);
+  animation: pb-shine 2s ease-in-out infinite;
+}
+@keyframes pb-shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* 教育进度条 - 绿色 */
+.pb-education .progress-bar-fill {
+  background: linear-gradient(90deg, #00cc33, var(--green));
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+}
+.pb-education .pb-percent { color: var(--green); }
+
+/* 陪伴进度条 - 暖金色 */
+.pb-companion .progress-bar-fill {
+  background: linear-gradient(90deg, #cc8800, var(--gold));
+  box-shadow: 0 0 8px rgba(255, 184, 71, 0.4);
+}
+.pb-companion .pb-percent { color: var(--gold); }
+
+/* 教育完成成功脉冲 */
+.pb-education.done .progress-bar-track {
+  animation: success-glow 0.6s ease-out 2;
+}
+@keyframes success-glow {
+  0%, 100% { box-shadow: 0 0 0px rgba(0, 255, 65, 0); }
+  50% { box-shadow: 0 0 20px rgba(0, 255, 65, 0.5); }
+}
+
+/* ============================================================
+   地图区域
+   ============================================================ */
+.map-section {
+  text-align: center;
+}
+.map-container {
+  position: relative;
+  display: inline-block;
+  width: 130px; height: 130px;
+  margin: 10px 0;
+}
+.map-container canvas {
+  width: 100%; height: 100%;
+}
+.map-label {
+  font-size: 12px; color: rgba(0, 255, 204, 0.55);
+  letter-spacing: 1px; margin-top: 4px;
+}
+.map-label .typing-text {
+  display: inline;
+}
+.map-label .blink-dots {
+  display: inline;
+  animation: ellipsis-blink 1.2s step-end infinite;
+}
+@keyframes ellipsis-blink {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ============================================================
+   祝福区域
+   ============================================================ */
+.blessing-section {
+  text-align: center;
+  padding-top: 10px;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.8s ease, transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.blessing-section.visible {
+  opacity: 1; transform: scale(1);
+}
+.blessing-text {
+  font-size: 20px; font-weight: bold;
+  color: var(--gold);
+  letter-spacing: 3px;
+  text-shadow:
+    0 0 10px rgba(255, 184, 71, 0.6),
+    0 0 25px rgba(255, 184, 71, 0.3),
+    0 0 50px rgba(255, 184, 71, 0.15);
+  animation: blessing-glow 2.5s ease-in-out infinite;
+}
+@keyframes blessing-glow {
+  0%, 100% { text-shadow: 0 0 10px rgba(255, 184, 71, 0.6), 0 0 25px rgba(255, 184, 71, 0.3); }
+  50% { text-shadow: 0 0 16px rgba(255, 184, 71, 0.8), 0 0 35px rgba(255, 184, 71, 0.5), 0 0 60px rgba(255, 184, 71, 0.2); }
+}
+.blessing-sub {
+  font-size: 10px; color: rgba(255, 184, 71, 0.4);
+  letter-spacing: 2px; margin-top: 4px;
+}
+
+/* ============================================================
+   动画关键帧 - 淡入
+   ============================================================ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   响应式 - 移动端
+   ============================================================ */
+@media (max-width: 600px) {
+  .terminal-panel { padding: 24px 18px 20px; max-width: 100%; }
+  .sys-header .title { font-size: 16px; letter-spacing: 1px; }
+  .progress-ring-container { width: 150px; height: 150px; }
+  .progress-ring__center-text .number { font-size: 32px; }
+  .boot-log .log-line { font-size: 10px; }
+  .hud-corner { font-size: 7px; }
+  .hud-tl { top: 6px; left: 8px; }
+  .hud-tr { top: 6px; right: 8px; }
+  .hud-bl { bottom: 6px; left: 8px; }
+  .hud-br { bottom: 6px; right: 8px; }
+  .warning-text { font-size: 11px; }
+  .blessing-text { font-size: 16px; }
+  .map-container { width: 100px; height: 100px; }
+}
+
+/* ============================================================
+	   下滑探索提示 - 终端面板内部右下角
+	   ============================================================ */
+	.panel-scroll-hint {
+	  text-align: right;
+	  margin-top: 16px;
+	  font-family: var(--font-mono);
+	  font-size: 10px;
+	  color: rgba(0, 255, 204, 0.4);
+	  letter-spacing: 1.5px;
+	  pointer-events: none;
+	  user-select: none;
+	  animation: hint-breathe 2.8s ease-in-out infinite;
+	  text-shadow: 0 0 6px rgba(0, 255, 204, 0.3);
+	}
+	.panel-scroll-hint .hint-arrow {
+	  display: inline;
+	  color: rgba(255, 184, 71, 0.55);
+	  text-shadow: 0 0 8px rgba(255, 184, 71, 0.4);
+	  margin: 0 6px;
+	  animation: hint-arrow-pulse 1.6s ease-in-out infinite;
+	}
+	@keyframes hint-breathe {
+	  0%, 100% { opacity: 0.3; }
+	  50% { opacity: 0.7; }
+	}
+	@keyframes hint-arrow-pulse {
+	  0%, 100% { opacity: 0.4; }
+	  50% { opacity: 0.85; }
+	}
+	@media (max-width: 480px) {
+	  .panel-scroll-hint { display: none; }
+	}
+
+
+/* ============================================================
+   走进成就殿堂 - 霓虹按钮
+   ============================================================ */
+.enter-hall-btn {
+  display: block; margin: 22px auto 0;
+  padding: 11px 30px;
+  background: transparent;
+  border: 1px solid var(--cyan-dim);
+  color: var(--cyan);
+  font-family: var(--font-mono);
+  font-size: 13px; letter-spacing: 2px;
+  cursor: pointer; border-radius: 2px;
+  text-shadow: 0 0 6px rgba(0,255,204,0.4);
+  box-shadow: 0 0 8px rgba(0,255,204,0.12), inset 0 0 8px rgba(0,255,204,0.04);
+  transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1);
+  position: relative; overflow: hidden;
+}
+.enter-hall-btn::after {
+  content: '';
+  position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0,255,204,0.12), transparent);
+  transition: left 0.5s ease;
+}
+.enter-hall-btn:hover {
+  transform: scale(1.06);
+  border-color: var(--cyan);
+  box-shadow: 0 0 22px rgba(0,255,204,0.45), 0 0 45px rgba(0,255,204,0.18), inset 0 0 14px rgba(0,255,204,0.08);
+  text-shadow: 0 0 14px rgba(0,255,204,0.75);
+  color: #fff;
+}
+.enter-hall-btn:hover::after { left: 100%; }
+.enter-hall-btn:active { transform: scale(0.98); }
+
+/* ============================================================
+   成就墙 - 全屏覆盖层
+   ============================================================ */
+.achievement-wall {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 50;
+  background: rgba(4, 8, 18, 0.94);
+  opacity: 0; visibility: hidden;
+  transform: translateY(30px);
+  transition: opacity 0.5s ease, transform 0.5s ease, visibility 0.5s;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  will-change: transform; /* 性能优化: 开启合成层，避免滚动卡顿 */
+}
+.achievement-wall.active {
+  opacity: 1; visibility: visible; transform: translateY(0);
+}
+
+/* 成就墙 - 内部扫描线 */
+.aw-scanlines {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 1;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px
+  );
+  animation: scanline-move 8s linear infinite;
+}
+
+/* 成就墙 - 内容容器 */
+.aw-inner {
+  position: relative; z-index: 2;
+  max-width: 1050px; margin: 0 auto;
+  padding: 30px 24px 60px;
+}
+
+/* ============================================================
+   返回终端按钮
+   ============================================================ */
+.aw-back-btn {
+  display: inline-block; margin-bottom: 16px;
+  padding: 8px 20px;
+  background: rgba(0,255,204,0.06);
+  border: 1px solid rgba(0,255,204,0.2);
+  color: var(--cyan);
+  font-family: var(--font-mono);
+  font-size: 12px; letter-spacing: 1px;
+  cursor: pointer; border-radius: 2px;
+  transition: all 0.3s ease;
+}
+.aw-back-btn:hover {
+  background: rgba(0,255,204,0.12);
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(0,255,204,0.25);
+  text-shadow: 0 0 6px rgba(0,255,204,0.5);
+}
+
+/* ============================================================
+   成就殿堂标题
+   ============================================================ */
+.aw-header {
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0,255,204,0.15);
+}
+.aw-header .sys-tag {
+  display: inline-block;
+  font-size: 10px; font-weight: bold;
+  color: var(--bg-deep); background: var(--cyan);
+  padding: 2px 8px; border-radius: 2px;
+  letter-spacing: 1px; margin-bottom: 8px;
+}
+.aw-header .aw-title {
+  font-size: 22px; font-weight: bold;
+  color: var(--cyan);
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px rgba(0,255,204,0.5), 0 0 20px rgba(0,255,204,0.2);
+}
+.aw-header .aw-title .prefix { color: var(--green); margin-right: 6px; }
+.aw-header .title-underline {
+  display: block; height: 1px;
+  background: var(--cyan); margin-top: 6px;
+}
+
+/* ============================================================
+   玩家档案卡片
+   ============================================================ */
+.aw-profile {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,255,204,0.2);
+  border-radius: 4px; padding: 18px 22px;
+  margin-bottom: 28px;
+  box-shadow: inset 0 0 30px rgba(0,255,204,0.03), 0 0 12px rgba(0,255,204,0.06);
+  backdrop-filter: blur(2px);
+}
+.aw-profile-header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: bold; color: var(--cyan);
+  letter-spacing: 1px; margin-bottom: 14px;
+  text-shadow: 0 0 6px rgba(0,255,204,0.3);
+}
+.aw-player-title {
+  margin-left: auto;
+  font-size: 12px; font-weight: bold;
+  padding: 3px 10px; border-radius: 2px;
+  letter-spacing: 1px;
+  color: #fff;
+  background: linear-gradient(135deg, rgba(0,255,204,0.3), rgba(0,255,204,0.08));
+  border: 1px solid rgba(0,255,204,0.35);
+  text-shadow: 0 0 8px rgba(0,255,204,0.6);
+  animation: title-shimmer 2.5s ease-in-out infinite;
+}
+@keyframes title-shimmer {
+  0%, 100% { box-shadow: 0 0 6px rgba(0,255,204,0.25); }
+  50% { box-shadow: 0 0 16px rgba(0,255,204,0.55); }
+}
+.aw-profile-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 10px; margin-bottom: 14px;
+}
+.aw-stat-item {
+  background: rgba(0,255,204,0.03);
+  border: 1px solid rgba(0,255,204,0.08);
+  border-radius: 3px; padding: 10px 12px;
+  text-align: center;
+}
+.aw-stat-label {
+  display: block; font-size: 10px;
+  color: rgba(200,220,240,0.5);
+  letter-spacing: 1px; margin-bottom: 4px;
+}
+.aw-stat-val {
+  font-size: 13px; font-weight: bold; letter-spacing: 1px;
+}
+.aw-stat-val.cyan { color: var(--cyan); text-shadow: 0 0 6px rgba(0,255,204,0.3); }
+.aw-stat-val.green { color: var(--green); text-shadow: 0 0 6px rgba(0,255,65,0.3); }
+.aw-stat-val.red { color: var(--red); text-shadow: 0 0 6px rgba(255,77,77,0.3); }
+.aw-stat-val.gold { color: var(--gold); text-shadow: 0 0 6px rgba(255,184,71,0.3); }
+
+.aw-achieve-summary {
+  font-size: 12px; color: rgba(200,220,240,0.7);
+  letter-spacing: 1px;
+}
+.aw-achieve-summary span { color: var(--cyan); }
+
+/* ============================================================
+/* ============================================================
+	   成就选项卡栏
+	   ============================================================ */
+	.aw-tabs {
+	  display: flex; gap: 6px; margin-bottom: 22px;
+	  border-bottom: 1px solid rgba(0,255,204,0.1);
+	  padding-bottom: 0;
+	  flex-wrap: wrap;
+	}
+	.aw-tab-btn {
+	  background: transparent;
+	  border: 1px solid transparent;
+	  color: rgba(200,220,240,0.45);
+	  font-family: var(--font-mono);
+	  font-size: 12px; padding: 8px 16px;
+	  cursor: pointer; letter-spacing: 1px;
+	  border-radius: 3px 3px 0 0;
+	  transition: all 0.3s ease;
+	  position: relative; bottom: -1px;
+	  white-space: nowrap;
+	}
+	.aw-tab-btn:hover {
+	  color: rgba(0,255,204,0.8);
+	  background: rgba(0,255,204,0.04);
+	  border-color: rgba(0,255,204,0.12);
+	}
+	.aw-tab-btn.active {
+	  color: var(--cyan);
+	  border-color: rgba(0,255,204,0.35);
+	  border-bottom-color: rgba(4,8,18,0.94);
+	  background: rgba(0,255,204,0.07);
+	  text-shadow: 0 0 8px rgba(0,255,204,0.5);
+	  box-shadow: 0 -2px 10px rgba(0,255,204,0.08);
+	}
+	.aw-tab-count {
+	  font-size: 10px; color: rgba(200,220,240,0.3);
+	  margin-left: 4px;
+	}
+	.aw-tab-btn.active .aw-tab-count {
+	  color: rgba(0,255,204,0.5);
+	}
+
+	/* ============================================================
+	   成就分类容器 (选项卡模式：仅显示当前选中分类)
+	   ============================================================ */
+	.aw-categories {
+	  display: flex; flex-direction: column; gap: 0;
+	}
+
+
+/* 单个分类区块 */
+	.aw-category {
+	  margin-bottom: 0;
+	  padding-bottom: 0;
+	  position: relative;
+	}
+
+/* 分类间分隔线 - 选项卡模式下隐藏 */
+	.aw-category::after {
+	  display: none;
+	}
+.aw-category:last-child::after { display: none; }
+.aw-category:last-child { margin-bottom: 0; padding-bottom: 0; }
+
+/* 分类标题 - 选项卡模式下隐藏(标题信息已在Tab按钮中显示) */
+	.aw-cat-title {
+	  display: none;
+	}
+
+/* 分类内卡片网格 - 选项卡模式，更大卡片 2~3列 */
+	.aw-cat-grid {
+	  display: grid;
+	  grid-template-columns: repeat(3, 1fr);
+	  gap: 20px;
+	}
+
+	/* 分类内卡片再次放大 (需求三: 200px+宽, 48px图标, 15px名称) */
+	.aw-cat-grid .ach-card {
+	  padding: 20px 16px;
+	  min-height: 180px;
+	  min-width: 0;
+	}
+	.aw-cat-grid .ach-card-icon { font-size: 48px; margin-bottom: 8px; }
+	.aw-cat-grid .ach-card-name { font-size: 15px; font-weight: bold; }
+	.aw-cat-grid .ach-card-desc { font-size: 12px; color: rgba(200,220,240,0.42); }
+
+/* ============================================================
+   单张成就卡片
+   ============================================================ */
+.ach-card {
+  position: relative;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  padding: 18px 12px 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1);
+  overflow: hidden;
+  min-height: 130px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  user-select: none;
+}
+.ach-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(0,255,204,0.04), transparent 70%);
+  opacity: 0; transition: opacity 0.3s;
+}
+.ach-card:hover::before { opacity: 1; }
+.ach-card:hover { transform: translateY(-3px); }
+
+/* 未解锁卡片 */
+.ach-card.locked {
+  filter: grayscale(100%);
+  border-color: rgba(255,255,255,0.06);
+  opacity: 0.55;
+}
+.ach-card.locked:hover {
+  opacity: 0.8;
+  border-color: rgba(255,255,255,0.18);
+}
+
+/* 已解锁卡片 */
+.ach-card.unlocked {
+  filter: grayscale(0%);
+  border-color: var(--cyan);
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(0,255,204,0.15), inset 0 0 16px rgba(0,255,204,0.03);
+}
+/* 性能优化: 用 ::after + opacity 动画替代 box-shadow 动画 */
+.ach-card.unlocked::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 4px;
+  pointer-events: none; z-index: 0;
+  box-shadow: 0 0 18px rgba(0,255,204,0.3), inset 0 0 28px rgba(0,255,204,0.06);
+  animation: card-glow-opacity 2.5s ease-in-out infinite;
+}
+@keyframes card-glow-opacity {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.7; }
+}
+
+/* 卡片图标 */
+.ach-card-icon {
+  font-size: 36px; line-height: 1.2;
+  margin-bottom: 6px; position: relative; z-index: 1;
+}
+/* 卡片名称 */
+.ach-card-name {
+  font-size: 12px; font-weight: bold;
+  color: rgba(200,220,240,0.8);
+  letter-spacing: 0.5px; position: relative; z-index: 1;
+  line-height: 1.3;
+}
+/* 卡片描述 - 默认可见，小字低透明度保持界面整洁 */
+.ach-card-desc {
+  font-size: 9px; color: rgba(200,220,240,0.4);
+  line-height: 1.35; margin-top: 5px;
+  position: relative; z-index: 1;
+}
+
+/* 锁定图标 */
+.ach-card-lock {
+  position: absolute; top: 8px; left: 10px;
+  font-size: 12px; opacity: 0.4; z-index: 2;
+  transition: opacity 0.3s;
+}
+.ach-card.unlocked .ach-card-lock { display: none; }
+
+/* 已解锁勾选 */
+.ach-card-check {
+  position: absolute; top: 8px; right: 10px;
+  font-size: 14px; color: var(--green);
+  text-shadow: 0 0 6px rgba(0,255,65,0.5);
+  z-index: 2; display: none;
+}
+.ach-card.unlocked .ach-card-check { display: block; }
+
+/* ============================================================
+   解锁动画
+   ============================================================ */
+.ach-card.unlocking {
+  animation: unlock-burst 0.7s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  z-index: 10;
+}
+@keyframes unlock-burst {
+  0% {
+    transform: scale(1);
+    filter: grayscale(100%);
+    box-shadow: 0 0 0 rgba(255,184,71,0);
+  }
+  40% {
+    transform: scale(1.18);
+    filter: grayscale(0%);
+    box-shadow: 0 0 40px rgba(255,184,71,0.9), 0 0 80px rgba(255,184,71,0.5), 0 0 120px rgba(255,184,71,0.25);
+    border-color: var(--gold);
+  }
+  100% {
+    transform: scale(1);
+    filter: grayscale(0%);
+    box-shadow: 0 0 10px rgba(0,255,204,0.18), inset 0 0 20px rgba(0,255,204,0.04);
+    border-color: var(--cyan);
+  }
+}
+
+/* ============================================================
+   "成就解锁！"浮动提示
+   ============================================================ */
+.unlock-toast {
+  position: fixed; z-index: 100;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 18px; font-weight: bold;
+  color: var(--gold);
+  letter-spacing: 2px;
+  text-shadow: 0 0 12px rgba(255,184,71,0.8), 0 0 30px rgba(255,184,71,0.4);
+  white-space: nowrap;
+  animation: toast-rise 1.6s ease-out forwards;
+  transform: translate(-50%, -50%);
+}
+@keyframes toast-rise {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.5); }
+  15% { opacity: 1; transform: translate(-50%, -12px) scale(1.15); }
+  30% { transform: translate(-50%, -20px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -70px) scale(1); }
+}
+
+/* ============================================================
+   成就墙响应式
+   ============================================================ */
+@media (max-width: 900px) {
+	  .aw-cat-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+	  .aw-cat-grid .ach-card { min-height: 160px; }
+	  .aw-cat-grid .ach-card-icon { font-size: 40px; }
+	  .aw-cat-grid .ach-card-name { font-size: 13px; }
+	  .aw-cat-grid .ach-card-desc { font-size: 11px; }
+	  .aw-profile-grid { grid-template-columns: repeat(2, 1fr); }
+	  .aw-inner { padding: 20px 16px 50px; }
+	  .aw-header .aw-title { font-size: 18px; }
+	  .aw-tab-btn { font-size: 11px; padding: 7px 12px; }
+	}
+	@media (max-width: 600px) {
+	  .aw-cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+	  .aw-cat-grid .ach-card { padding: 14px 10px; min-height: 130px; }
+	  .aw-cat-grid .ach-card-icon { font-size: 32px; }
+	  .aw-cat-grid .ach-card-name { font-size: 11px; }
+	  .aw-cat-grid .ach-card-desc { font-size: 10px; }
+	  .aw-profile-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+	  .aw-inner { padding: 16px 10px 40px; }
+	  .ach-card { padding: 14px 8px 10px; min-height: 110px; }
+	  .ach-card-icon { font-size: 28px; }
+	  .ach-card-name { font-size: 10px; }
+	  .ach-card-desc { font-size: 9px; }
+	  .aw-header .aw-title { font-size: 16px; }
+	  .aw-stat-item { padding: 8px 6px; }
+	  .aw-stat-val { font-size: 11px; }
+	  .aw-stat-label { font-size: 9px; }
+	  .enter-hall-btn { font-size: 11px; padding: 10px 22px; letter-spacing: 1px; }
+	  .aw-back-btn { font-size: 10px; padding: 6px 14px; }
+	  .aw-tabs { gap: 3px; }
+	  .aw-tab-btn { font-size: 10px; padding: 6px 10px; letter-spacing: 0.5px; }
+	}
+</style>
+</head>
+<body>
+
+<!-- =========================================================
+     背景层
+     ========================================================= -->
+<canvas id="starfield"></canvas>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+<div class="crt-flicker"></div>
+<div class="glitch-overlay" id="glitchOverlay"></div>
+
+<!-- =========================================================
+     主终端容器
+     ========================================================= -->
+<div class="terminal-wrapper">
+  <div class="terminal-panel" id="panel">
+
+    <!-- 四角 HUD -->
+    <div class="hud-corner hud-tl">
+      <span class="label">SYS:</span><span class="value">EARTH-ONLINE v3.7.1</span>
+    </div>
+    <div class="hud-corner hud-tr">
+      <span class="label">UTC </span><span class="value" id="hudTime">2026-06-11 08:37:14</span><br>
+      <span class="label">NODE </span><span class="value">#0x7F3A-CN</span>
+    </div>
+    <div class="hud-corner hud-bl">
+      <span class="blink-dot"></span><span class="label">SIGNAL </span><span class="value">87%</span><br>
+      <span class="label">LAT </span><span class="value">31.23°N</span>
+    </div>
+    <div class="hud-corner hud-br" style="text-align:right">
+      <span class="label">FPS </span><span class="value">60</span><br>
+      <span class="label">LON </span><span class="value">121.47°E</span>
+    </div>
+
+    <!-- 启动日志 -->
+    <div class="boot-log" id="bootLog">
+      <div class="log-line" data-index="0"><span class="prompt">&gt;</span>系统初始化中<span class="log-dots">...</span></div>
+      <div class="log-line" data-index="1"><span class="prompt">&gt;</span>加载核心模块<span class="log-dots">...</span></div>
+      <div class="log-line" data-index="2"><span class="prompt">&gt;</span>建立神经连接<span class="log-dots">...</span><span class="ok">[OK]</span></div>
+      <div class="log-line" data-index="3"><span class="prompt">&gt;</span>同步云端数据<span class="log-dots">...</span><span class="ok">[OK]</span></div>
+      <div class="log-line" data-index="4"><span class="prompt">&gt;</span>校准时空坐标<span class="log-dots">...</span><span class="ok">[OK]</span></div>
+    </div>
+
+    <!-- 标题 -->
+    <header class="sys-header" id="sysHeader">
+      <div class="sys-tag">[SYS] 推送消息</div>
+      <h1 class="title"><span class="prefix">▸</span>地球online提示：</h1>
+      <span class="title-underline"></span>
+    </header>
+
+    <!-- 人生进度 20% -->
+    <section class="content-section life-section" id="lifeSection">
+      <div class="section-label">◆ 人生进度 ◆</div>
+      <div class="progress-ring-container" id="progressRing">
+        <svg viewBox="0 0 200 200">
+          <circle class="progress-ring__track" cx="100" cy="100" r="85"/>
+          <circle class="progress-ring__glow" id="ringGlow" cx="100" cy="100" r="85"
+            stroke-dasharray="534.07" stroke-dashoffset="534.07"/>
+          <circle class="progress-ring__arc" id="ringArc" cx="100" cy="100" r="85"
+            stroke-dasharray="534.07" stroke-dashoffset="534.07"/>
+        </svg>
+        <div class="progress-ring__center-text">
+          <div><span class="number" id="lifeNumber">0</span><span class="unit">%</span></div>
+          <div class="sub-label">LIFE PROGRESS</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 辅助系统已终止 -->
+    <section class="content-section warning-section" id="warningSection">
+      <span class="warning-icon">&#9888;</span>
+      <div>
+        <div class="warning-text">辅助系统已终止</div>
+        <div class="warning-sub">Auxiliary System: OFFLINE — 独立模式已激活</div>
+      </div>
+    </section>
+
+    <!-- 特殊任务 12年教育 已完成 100% -->
+    <section class="content-section" id="educationSection">
+      <div class="progress-bar-group pb-education" id="eduProgressGroup">
+        <div class="pb-label">
+          <span class="icon">&#10003;</span>
+          <span>特殊任务（12年教育）已完成</span>
+          <span class="pb-percent" id="eduPercent">0%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="eduBar" style="width:0%"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 父母的陪伴 已完成 80% -->
+    <section class="content-section" id="companionSection">
+      <div class="progress-bar-group pb-companion">
+        <div class="pb-label">
+          <span class="icon">&#9829;</span>
+          <span>父母的陪伴已完成</span>
+          <span class="pb-percent" id="compPercent">0%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="compBar" style="width:0%"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 完整地图已经加载 -->
+    <section class="content-section map-section" id="mapSection">
+      <div class="pb-label" style="justify-content:center; margin-bottom:4px;">
+        <span class="icon">&#9712;</span>
+        <span>完整地图已经加载</span>
+      </div>
+      <div class="map-container">
+        <canvas id="minimapCanvas" width="140" height="140"></canvas>
+      </div>
+      <div class="map-label">
+        <span class="typing-text" id="typingText"></span><span class="blink-dots" id="blinkDots">···</span>
+      </div>
+    </section>
+
+    <!-- 祝福 -->
+    <section class="content-section blessing-section" id="blessingSection">
+      <div class="blessing-text">【祝您好运！】</div>
+      <div class="blessing-sub">GOOD LUCK · PLAYER</div>
+      <button class="enter-hall-btn" id="enterHallBtn">▸ 走进成就殿堂</button>
+          <div class="panel-scroll-hint"><span class="hint-arrow">↓</span> 下滑探索更多 <span class="hint-arrow">↓</span></div>
+    </section>
+
+  </div>
+</div>
+
+<!-- =========================================================
+     成就殿堂 — 成就墙覆盖层
+     ========================================================= -->
+<div class="achievement-wall" id="achievementWall">
+  <div class="aw-scanlines"></div>
+  <div class="aw-inner">
+
+    <!-- 返回终端按钮 -->
+    <button class="aw-back-btn" id="awBackBtn">◂ 返回终端</button>
+
+    <!-- 成就殿堂标题 -->
+    <div class="aw-header">
+      <span class="sys-tag" style="animation: tag-pulse 2s ease-in-out infinite;">ACHIEVEMENT HALL</span>
+      <h1 class="aw-title"><span class="prefix">▸</span>成就殿堂</h1>
+      <span class="title-underline" style="width:100%;"></span>
+    </div>
+
+    <!-- 玩家档案摘要卡片 -->
+    <div class="aw-profile" id="awProfile">
+      <div class="aw-profile-header">
+        <span>&#128203;</span> 玩家档案
+        <span class="aw-player-title" id="awPlayerTitle">新手玩家</span>
+      </div>
+      <div class="aw-profile-grid">
+        <div class="aw-stat-item">
+          <span class="aw-stat-label">人生进度</span>
+          <span class="aw-stat-val cyan">20%</span>
+        </div>
+        <div class="aw-stat-item">
+          <span class="aw-stat-label">特殊任务</span>
+          <span class="aw-stat-val green">&#10003; 已完成</span>
+        </div>
+        <div class="aw-stat-item">
+          <span class="aw-stat-label">辅助系统</span>
+          <span class="aw-stat-val red">&#9888; 已终止</span>
+        </div>
+        <div class="aw-stat-item">
+          <span class="aw-stat-label">父母陪伴</span>
+          <span class="aw-stat-val gold">80%</span>
+        </div>
+      </div>
+      <div class="aw-achieve-summary">
+        <span>成就进度：</span>
+        <span id="awUnlockedCount">0</span><span> / 25</span>
+        <div class="progress-bar-track" style="margin-top:8px;">
+          <div class="progress-bar-fill" id="awAchieveBar" style="width:0%; background:linear-gradient(90deg, #00cc88, var(--cyan)); box-shadow: 0 0 8px rgba(0,255,204,0.4);"></div>
+        </div>
+      </div>
+    </div>
+
+	    <!-- 成就选项卡栏 -->
+	    <div class="aw-tabs" id="awTabs">
+	      <button class="aw-tab-btn active" data-tab="daily">🏠 日常<span class="aw-tab-count">0/5</span></button>
+	      <button class="aw-tab-btn" data-tab="social">💬 社交<span class="aw-tab-count">0/5</span></button>
+	      <button class="aw-tab-btn" data-tab="work">💻 工作/学习<span class="aw-tab-count">0/6</span></button>
+	      <button class="aw-tab-btn" data-tab="life">🌱 人生<span class="aw-tab-count">0/6</span></button>
+	      <button class="aw-tab-btn" data-tab="easter">🥚 彩蛋<span class="aw-tab-count">0/3</span></button>
+	    </div>
+
+    <!-- 成就卡片 - 按分类动态渲染 -->
+    <div class="aw-categories" id="awCategories">
+      <!-- 由 JS 按5个分类动态渲染 -->
+    </div>
+
+  </div>
+</div>
+
+<!-- =========================================================
+     JavaScript - 动画引擎 & 时间线控制
+     ========================================================= -->
+<script>
+(function() {
+  'use strict';
+
+  // ============================================================
+  // DOM 引用缓存
+  // ============================================================
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => document.querySelectorAll(s);
+
+  const starCanvas = $('#starfield');
+  const starCtx = starCanvas.getContext('2d');
+  const minimapCanvas = $('#minimapCanvas');
+  const minimapCtx = minimapCanvas.getContext('2d');
+  const glitchOverlay = $('#glitchOverlay');
+  const panel = $('#panel');
+
+  const bootLog = $('#bootLog');
+  const bootLines = $$('.boot-log .log-line');
+  const sysHeader = $('#sysHeader');
+  const lifeSection = $('#lifeSection');
+  const warningSection = $('#warningSection');
+  const educationSection = $('#educationSection');
+  const companionSection = $('#companionSection');
+  const mapSection = $('#mapSection');
+  const blessingSection = $('#blessingSection');
+
+  const ringArc = $('#ringArc');
+  const ringGlow = $('#ringGlow');
+  const lifeNumber = $('#lifeNumber');
+  const eduBar = $('#eduBar');
+  const eduPercent = $('#eduPercent');
+  const compBar = $('#compBar');
+  const compPercent = $('#compPercent');
+  const eduProgressGroup = $('#eduProgressGroup');
+  const typingText = $('#typingText');
+  const blinkDots = $('#blinkDots');
+  const hudTime = $('#hudTime');
+
+  // ============================================================
+  // 常量
+  // ============================================================
+  const RING_CIRCUMFERENCE = 2 * Math.PI * 85; // ~534.07
+  const LIFE_TARGET = 20;
+  const EDU_TARGET = 100;
+  const COMP_TARGET = 80;
+  const MAP_TYPING_TEXT = '自由探索';
+
+  // ============================================================
+  // 更新 HUD 时间戳
+  // ============================================================
+  function updateHudTime() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    hudTime.textContent =
+      `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ` +
+      `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  }
+  updateHudTime();
+  setInterval(updateHudTime, 1000);
+
+  // ============================================================
+  // 星空背景
+  // ============================================================
+  let stars = [];
+  const STAR_COUNT = 60; // 性能优化: 160→80→60, 减轻GPU计算量
+
+  function resizeStarCanvas() {
+    starCanvas.width = window.innerWidth;
+    starCanvas.height = window.innerHeight;
+  }
+
+  function initStars() {
+    resizeStarCanvas();
+    stars = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+      stars.push({
+        x: Math.random() * starCanvas.width,
+        y: Math.random() * starCanvas.height,
+        r: Math.random() * 1.6 + 0.4,
+        speed: Math.random() * 0.3 + 0.05,
+        opacity: Math.random() * 0.6 + 0.2,
+        twinkleSpeed: Math.random() * 0.02 + 0.005,
+        twinkleOffset: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  let starTime = 0;
+  function drawStars() {
+    starCtx.clearRect(0, 0, starCanvas.width, starCanvas.height);
+    for (const s of stars) {
+      // 缓慢上移
+      s.y -= s.speed;
+      if (s.y < -5) { s.y = starCanvas.height + 5; s.x = Math.random() * starCanvas.width; }
+      // 闪烁
+      const twinkle = 0.5 + 0.5 * Math.sin(starTime * s.twinkleSpeed + s.twinkleOffset);
+      const alpha = s.opacity * (0.6 + 0.4 * twinkle);
+      starCtx.beginPath();
+      starCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      starCtx.fillStyle = `rgba(180,220,255,${alpha})`;
+      starCtx.fill();
+      // 亮星加辉光
+      if (s.r > 1.2 && twinkle > 0.8) {
+        starCtx.beginPath();
+        starCtx.arc(s.x, s.y, s.r * 2.5, 0, Math.PI * 2);
+        starCtx.fillStyle = `rgba(0,255,204,${alpha * 0.15})`;
+        starCtx.fill();
+      }
+    }
+    starTime++;
+  }
+
+  // ============================================================
+  // 小地图 - 简易地球网格 (离屏Canvas缓存优化)
+  // ============================================================
+  const minimapDots = [];
+  const MINIMAP_SIZE = 140;
+  const MINIMAP_CX = MINIMAP_SIZE / 2;
+  const MINIMAP_CY = MINIMAP_SIZE / 2;
+  const MINIMAP_R = 55;
+  let minimapStaticCanvas = null; // 离屏Canvas缓存静态部分
+
+  function initMinimapDots() {
+    minimapDots.length = 0;
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * MINIMAP_R * 0.8;
+      minimapDots.push({
+        x: MINIMAP_CX + Math.cos(angle) * dist,
+        y: MINIMAP_CY + Math.sin(angle) * dist * 0.6,
+        r: Math.random() * 2 + 1,
+        blinkPhase: Math.random() * Math.PI * 2,
+        blinkSpeed: Math.random() * 0.05 + 0.03
+      });
+    }
+  }
+
+  // 将小地图静态部分预绘制到离屏Canvas，避免每帧重复计算路径
+  function initMinimapStatic() {
+    minimapStaticCanvas = document.createElement('canvas');
+    minimapStaticCanvas.width = MINIMAP_SIZE;
+    minimapStaticCanvas.height = MINIMAP_SIZE;
+    const ctx = minimapStaticCanvas.getContext('2d');
+
+    // 地球外圈
+    ctx.beginPath();
+    ctx.ellipse(MINIMAP_CX, MINIMAP_CY, MINIMAP_R, MINIMAP_R * 0.65, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0,255,204,0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // 外圈辉光
+    ctx.beginPath();
+    ctx.ellipse(MINIMAP_CX, MINIMAP_CY, MINIMAP_R + 2, MINIMAP_R * 0.65 + 2, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0,255,204,0.1)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // 纬线
+    for (let lat = -0.6; lat <= 0.6; lat += 0.3) {
+      const ry = Math.abs(lat) * MINIMAP_R * 0.65;
+      const rx = Math.sqrt(1 - lat * lat) * MINIMAP_R;
+      ctx.beginPath();
+      ctx.ellipse(MINIMAP_CX, MINIMAP_CY + lat * MINIMAP_R * 0.65, rx, Math.max(ry, 2), 0, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0,255,204,0.12)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    // 经线
+    for (let lon = -0.7; lon <= 0.7; lon += 0.35) {
+      const rxx = Math.abs(lon) * MINIMAP_R * 0.15;
+      ctx.beginPath();
+      ctx.ellipse(MINIMAP_CX + lon * MINIMAP_R, MINIMAP_CY, Math.max(rxx, 1.5), MINIMAP_R * 0.65, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0,255,204,0.12)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    // 赤道线
+    ctx.beginPath();
+    ctx.ellipse(MINIMAP_CX, MINIMAP_CY, MINIMAP_R, MINIMAP_R * 0.65, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0,255,204,0.18)';
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+  }
+
+  function drawMinimap(time) {
+    minimapCtx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+    // 贴图静态部分 (一次drawImage替代多次路径计算)
+    if (minimapStaticCanvas) {
+      minimapCtx.drawImage(minimapStaticCanvas, 0, 0);
+    }
+    // 仅绘制动态闪烁点
+    for (const dot of minimapDots) {
+      const blink = 0.35 + 0.65 * Math.abs(Math.sin(time * dot.blinkSpeed + dot.blinkPhase));
+      minimapCtx.beginPath();
+      minimapCtx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+      minimapCtx.fillStyle = `rgba(0,255,204,${blink * 0.8})`;
+      minimapCtx.fill();
+      minimapCtx.beginPath();
+      minimapCtx.arc(dot.x, dot.y, dot.r * 3, 0, Math.PI * 2);
+      minimapCtx.fillStyle = `rgba(0,255,204,${blink * 0.2})`;
+      minimapCtx.fill();
+    }
+  }
+
+  // ============================================================
+  // 故障艺术效果
+  // ============================================================
+  function triggerGlitch() {
+    if (glitchOverlay.classList.contains('active')) return;
+    glitchOverlay.classList.add('active');
+    setTimeout(() => glitchOverlay.classList.remove('active'), 200 + Math.random() * 150);
+  }
+
+  function scheduleGlitch() {
+    const delay = 10000 + Math.random() * 25000; // 性能优化: 降低触发频率
+    setTimeout(() => {
+      if (Math.random() < 0.35) triggerGlitch(); // 性能优化: 降低触发概率
+      scheduleGlitch();
+    }, delay);
+  }
+
+  // ============================================================
+  // 鼠标视差微动 (rAF节流，每帧最多更新一次)
+  // ============================================================
+  let pendingDx = 0, pendingDy = 0, mouseRafId = null;
+  document.addEventListener('mousemove', (e) => {
+    pendingDx = (e.clientX / window.innerWidth - 0.5) * 8;
+    pendingDy = (e.clientY / window.innerHeight - 0.5) * 8;
+    if (mouseRafId === null) {
+      mouseRafId = requestAnimationFrame(() => {
+        panel.style.transform = `translate(${pendingDx}px, ${pendingDy}px)`;
+        mouseRafId = null;
+      });
+    }
+  });
+
+  // ============================================================
+  // 计数器动画 (requestAnimationFrame)
+  // ============================================================
+  function animateCounter(el, from, to, duration, suffix = '') {
+    const start = performance.now();
+    function tick(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = Math.round(from + (to - from) * eased);
+      el.textContent = current + suffix;
+      if (progress < 1) {
+        requestAnimationFrame(tick);
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // ============================================================
+  // 进度环动画
+  // ============================================================
+  function animateProgressRing(targetPercent, duration) {
+    const targetOffset = RING_CIRCUMFERENCE * (1 - targetPercent / 100);
+    // 使用 CSS transition —— 直接设置目标值
+    ringArc.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(0.22,0.61,0.36,1)`;
+    ringGlow.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(0.22,0.61,0.36,1)`;
+    ringArc.style.strokeDashoffset = targetOffset;
+    ringGlow.style.strokeDashoffset = targetOffset;
+  }
+
+  // ============================================================
+  // 横向进度条动画
+  // ============================================================
+  function animateProgressBar(barEl, percentEl, targetPercent, duration) {
+    barEl.style.transition = `width ${duration}ms cubic-bezier(0.22,0.61,0.36,1)`;
+    barEl.style.width = targetPercent + '%';
+    animateCounter(percentEl, 0, targetPercent, duration, '%');
+  }
+
+  // ============================================================
+  // 打字机效果
+  // ============================================================
+  function typeWriter(el, text, charDelay, onComplete) {
+    let i = 0;
+    el.textContent = '';
+    const interval = setInterval(() => {
+      el.textContent += text[i];
+      i++;
+      if (i >= text.length) {
+        clearInterval(interval);
+        if (onComplete) onComplete();
+      }
+    }, charDelay);
+  }
+
+  // ============================================================
+  // 显示元素 (添加 visible 类)
+  // ============================================================
+  function reveal(el, delay) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        el.classList.add('visible');
+        // 等待 transition 完成
+        setTimeout(resolve, 500);
+      }, delay);
+    });
+  }
+
+  // ============================================================
+  // 启动日志序列
+  // ============================================================
+  async function runBootSequence() {
+	    for (let i = 0; i < bootLines.length; i++) {
+	      await new Promise(resolve => {
+	        setTimeout(() => {
+	          bootLines[i].classList.add('visible');
+	          resolve();
+	        }, i === 0 ? 200 : 350);
+	      });
+	    }
+	    // 启动日志显示完成后保持1.4秒可读，然后自动淡出消失
+	    await new Promise(r => setTimeout(r, 1400));
+	    bootLog.classList.add('fade-out');
+	    await new Promise(r => setTimeout(r, 600));
+	    bootLog.style.display = 'none';
+	  }
+
+  // ============================================================
+  // 主时间线
+  // ============================================================
+  async function runTimeline() {
+    // 阶段 0: 启动日志
+    await runBootSequence();
+
+    // 阶段 1: 标题出现
+    await reveal(sysHeader, 100);
+
+    // 阶段 2: 人生进度 - 圆形进度环 0→20%
+    await reveal(lifeSection, 200);
+    await new Promise(r => setTimeout(r, 300));
+    animateProgressRing(LIFE_TARGET, 2200);
+    animateCounter(lifeNumber, 0, LIFE_TARGET, 2200, '');
+    await new Promise(r => setTimeout(r, 2300));
+
+    // 阶段 3: 辅助系统已终止 - 警告样式
+    await reveal(warningSection, 100);
+    setTimeout(() => warningSection.classList.add('active'), 100);
+    await new Promise(r => setTimeout(r, 400));
+
+    // 阶段 4: 特殊任务（12年教育）已完成 100%
+    await reveal(educationSection, 100);
+    await new Promise(r => setTimeout(r, 300));
+    animateProgressBar(eduBar, eduPercent, EDU_TARGET, 1800);
+    await new Promise(r => setTimeout(r, 1900));
+    // 成功脉冲动画
+    eduProgressGroup.classList.add('done');
+    await new Promise(r => setTimeout(r, 400));
+
+    // 阶段 5: 父母的陪伴已完成 80%
+    await reveal(companionSection, 100);
+    await new Promise(r => setTimeout(r, 200));
+    animateProgressBar(compBar, compPercent, COMP_TARGET, 1800);
+    await new Promise(r => setTimeout(r, 1900));
+
+    // 阶段 6: 完整地图已经加载
+    await reveal(mapSection, 100);
+    await new Promise(r => setTimeout(r, 400));
+    // 打字机效果: "自由探索···"
+    typeWriter(typingText, MAP_TYPING_TEXT, 120, () => {
+      // 打字完成后让省略号持续闪烁
+      blinkDots.style.animation = 'ellipsis-blink 1.2s step-end infinite';
+    });
+    await new Promise(r => setTimeout(r, MAP_TYPING_TEXT.length * 120 + 300));
+
+    // 阶段 7: 祝福
+    await new Promise(r => setTimeout(r, 300));
+    await reveal(blessingSection, 100);
+
+    console.log('[SYS] 地球online 系统初始化完成 — 祝您好运！');
+  }
+
+  // ============================================================
+  // 窗口大小变化处理
+  // ============================================================
+  window.addEventListener('resize', () => {
+    resizeStarCanvas();
+    // 重新生成星星（简单处理：保留原有星星，调整越界坐标）
+    for (const s of stars) {
+      if (s.x > starCanvas.width) s.x = starCanvas.width;
+      if (s.y > starCanvas.height) s.y = starCanvas.height;
+    }
+  });
+
+  // ============================================================
+  // 主渲染循环 (节流: 桌面30fps, 移动端15fps)
+  // ============================================================
+  let animTime = 0;
+  let lastDrawTime = 0;
+  function getFrameInterval() {
+    return window.innerWidth <= 600 ? 1000 / 15 : 1000 / 30;
+  }
+  function renderLoop(timestamp) {
+    animTime = timestamp;
+    const interval = getFrameInterval();
+    if (timestamp - lastDrawTime >= interval) {
+      lastDrawTime = timestamp;
+      drawStars();
+      drawMinimap(animTime);
+    }
+    requestAnimationFrame(renderLoop);
+  }
+
+  // ============================================================
+  // 启动一切
+  // ============================================================
+  function init() {
+    initStars();
+    initMinimapDots();
+    initMinimapStatic(); // 性能优化: 预绘制小地图静态部分到离屏Canvas
+    resizeStarCanvas();
+
+    // 启动渲染循环
+    requestAnimationFrame(renderLoop);
+
+    // 启动故障效果定时器
+    scheduleGlitch();
+
+    // 启动主时间线
+    setTimeout(runTimeline, 500);
+  }
+
+  // ============================================================
+  // 成就系统 - 数据定义 (25个成就)
+  // ============================================================
+  const ACHIEVEMENTS = [
+    { id: 'ach01', name: '被床封印者', icon: '🛌', desc: '连续按下"再睡五分钟"按钮超过3次。' },
+    { id: 'ach02', name: '光合作用失败', icon: '🌑', desc: '连续3天没有见到自然光。' },
+    { id: 'ach03', name: '空腹喝冰美式の勇者', icon: '☕', desc: '将"冰美式"设置为早餐主食，持续一周。' },
+    { id: 'ach04', name: '洗衣机里的考古学', icon: '🧦', desc: '在洗衣机里发现上周遗忘的、已经产生新生态系统的衣物。' },
+    { id: 'ach05', name: '卡路里数学家', icon: '🍰', desc: '在吃掉一整个蛋糕的同时，搜索"蛋糕的热量是多少大卡"。' },
+    { id: 'ach06', name: '社恐の大胜利', icon: '🤝', desc: '在电梯里与陌生人共处30秒，且没有掏出手机。' },
+    { id: 'ach07', name: '已读不回の王者', icon: '📱', desc: '累计有100条消息处于"已读"但未回复状态。' },
+    { id: 'ach08', name: '"我没事"谎言成就', icon: '🎭', desc: '在心情极差时，对他人说出"我没事"累计50次。' },
+    { id: 'ach09', name: '无效社交终结者', icon: '🚫', desc: '成功推掉一个你内心深处完全不想去的饭局。' },
+    { id: 'ach10', name: '群聊隐身衣', icon: '👻', desc: '在一个超过50人的群聊中，连续30天未发一言却不被踢。' },
+    { id: 'ach11', name: 'Deadline 死神之舞', icon: '⏰', desc: '在截止时间前最后1分钟内成功提交任务。' },
+    { id: 'ach12', name: '会议马拉松金牌', icon: '🏅', desc: '在一个长达2小时的会议中，保持双眼睁开且大脑待机。' },
+    { id: 'ach13', name: 'Ctrl+S 强迫症', icon: '💾', desc: '1分钟内按下Ctrl+S超过5次。' },
+    { id: 'ach14', name: '学习资料收藏家', icon: '📚', desc: '收藏夹数量突破1000，且实际观看率为0。' },
+    { id: 'ach15', name: 'BUG 献祭者', icon: '🐛', desc: '代码无改动却突然能跑了，并决定不再追问原因。' },
+    { id: 'ach16', name: '深夜哲学家', icon: '🌙', desc: '在凌晨2点后，开始思考"人生的意义是什么"。' },
+    { id: 'ach17', name: '眼泪拌饭体验者', icon: '🍚', desc: '经历过一次边哭边吃饭的剧情。' },
+    { id: 'ach18', name: '与孤独和解', icon: '🎡', desc: '独自完成去看电影、吃火锅、去游乐园中的任意两项。' },
+    { id: 'ach19', name: '戒断反应抵抗者', icon: '📵', desc: '忘记带手机超过4小时且没有崩溃。' },
+    { id: 'ach20', name: '找到一份热爱（隐藏）', icon: '❤️', desc: '概率触发，条件未知。据说只有极少数玩家能解锁。' },
+    { id: 'ach21', name: '命运的齿轮卡了', icon: '🦵', desc: '走路时被自己绊倒。' },
+    { id: 'ach22', name: '钱包黑洞', icon: '🕳️', desc: '刚拿到一笔钱，在毫无察觉的情况下它消失了。' },
+    { id: 'ach23', name: 'Bug级运气', icon: '🍀', desc: '在闹钟响前一分钟自然醒来。' },
+    { id: 'ach24', name: 'NPC 觉醒时刻', icon: '🤖', desc: '突然意识到自己正在重复某段生活模式，并决定改变。' },
+    { id: 'ach25', name: '卡点下班冠军', icon: '🏃', desc: '连续一周在17:00准时离开工位。' }
+  ];
+
+  const STORAGE_KEY = 'earthOnlineAchievements';
+
+  // ============================================================
+  // 成就系统 - 5大分类定义
+  // ============================================================
+  const ACHIEVEMENT_CATEGORIES = [
+    { key: 'daily',  name: '日常',       icon: '🏠', ids: ['ach01','ach02','ach03','ach04','ach05'] },
+    { key: 'social', name: '社交',       icon: '💬', ids: ['ach06','ach07','ach08','ach09','ach10'] },
+    { key: 'work',   name: '工作/学习',  icon: '💻', ids: ['ach11','ach12','ach13','ach14','ach15','ach25'] },
+    { key: 'life',   name: '人生',       icon: '🌱', ids: ['ach16','ach17','ach18','ach19','ach21','ach24'] },
+    { key: 'easter', name: '彩蛋',       icon: '🥚', ids: ['ach20','ach22','ach23'] }
+  ];
+
+  // ============================================================
+  // 成就系统 - DOM 引用
+  // ============================================================
+  const achievementWall = $('#achievementWall');
+  const awCategories = $('#awCategories');
+  const awUnlockedCount = $('#awUnlockedCount');
+  const awAchieveBar = $('#awAchieveBar');
+  const awPlayerTitle = $('#awPlayerTitle');
+  const awProfile = $('#awProfile');
+  const enterHallBtn = $('#enterHallBtn');
+  const awBackBtn = $('#awBackBtn');
+
+  // ============================================================
+  // 成就系统 - localStorage 读写
+  // ============================================================
+  function loadUnlockedIds() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveUnlockedIds(ids) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    } catch (e) {
+      // localStorage 不可用时静默失败
+    }
+  }
+
+  // ============================================================
+  // 成就系统 - Web Audio API 解锁音效
+  // ============================================================
+  function playUnlockSound() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      // 频率从800Hz上升到1200Hz，营造清脆提示感
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.06);
+
+      // 音量快速衰减
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.18);
+    } catch (e) {
+      // 音频不可用时静默失败
+    }
+  }
+
+  // ============================================================
+  // 成就系统 - 根据解锁数量计算称号
+  // ============================================================
+  function getPlayerTitle(count) {
+    if (count >= 25) return '全成就·地球管理员';
+    if (count >= 20) return '人生霸主';
+    if (count >= 10) return '成就猎人';
+    if (count >= 5)  return '进阶探索者';
+    return '新手玩家';
+  }
+
+  // ============================================================
+  // 成就系统 - 更新档案面板统计
+  // ============================================================
+  function updateProfilePanel(unlockedIds) {
+    const count = unlockedIds.length;
+    const total = ACHIEVEMENTS.length;
+    const percent = Math.round((count / total) * 100);
+
+    awUnlockedCount.textContent = count;
+    awAchieveBar.style.transition = 'width 0.6s cubic-bezier(0.22,0.61,0.36,1)';
+    awAchieveBar.style.width = percent + '%';
+
+    const title = getPlayerTitle(count);
+    awPlayerTitle.textContent = title;
+
+    // 称号达到最高级别时的特殊光效
+    if (count >= 25) {
+      awPlayerTitle.style.background = 'linear-gradient(135deg, rgba(255,184,71,0.5), rgba(255,77,77,0.3))';
+      awPlayerTitle.style.borderColor = 'rgba(255,184,71,0.6)';
+      awPlayerTitle.style.textShadow = '0 0 14px rgba(255,184,71,0.8), 0 0 30px rgba(255,184,71,0.4)';
+      awPlayerTitle.style.color = '#ffd700';
+    }
+
+    // 更新各分类计数
+    if (achievementCardsBuilt) {
+      ACHIEVEMENT_CATEGORIES.forEach(cat => {
+        const countEl = document.querySelector('.aw-cat-count[data-cat-count="' + cat.key + '"]');
+        if (countEl) {
+          const unlockedInCat = cat.ids.filter(id => unlockedIds.includes(id)).length;
+          countEl.textContent = unlockedInCat + ' / ' + cat.ids.length;
+        }
+      });
+    }
+  }
+
+  // ============================================================
+  // 成就系统 - 卡片DOM缓存 (一次生成，避免每回打开重建)
+  // ============================================================
+  let achievementCardsBuilt = false;
+
+  function buildAchievementCards() {
+    if (achievementCardsBuilt) return;
+    awCategories.innerHTML = '';
+
+    // 成就ID → 成就对象 快速查找表
+    const achMap = {};
+    ACHIEVEMENTS.forEach(a => { achMap[a.id] = a; });
+
+    ACHIEVEMENT_CATEGORIES.forEach(cat => {
+      // 分类区块容器
+      const section = document.createElement('div');
+      section.className = 'aw-category';
+      section.setAttribute('data-cat', cat.key);
+
+      // 分类标题
+      const titleEl = document.createElement('div');
+      titleEl.className = 'aw-cat-title';
+      titleEl.innerHTML =
+        '<span class="cat-icon">' + cat.icon + '</span>' +
+        '【' + cat.name + '】' +
+        '<span class="aw-cat-count" data-cat-count="' + cat.key + '">0 / ' + cat.ids.length + '</span>';
+
+      // 卡片网格
+      const grid = document.createElement('div');
+      grid.className = 'aw-cat-grid';
+
+      cat.ids.forEach(id => {
+        const ach = achMap[id];
+        if (!ach) return;
+        const card = document.createElement('div');
+        card.className = 'ach-card locked';
+        card.setAttribute('data-ach-id', ach.id);
+        card.innerHTML =
+          '<div class="ach-card-lock">&#128274;</div>' +
+          '<div class="ach-card-check">&#10004;&#65039;</div>' +
+          '<div class="ach-card-icon">' + ach.icon + '</div>' +
+          '<div class="ach-card-name">' + ach.name + '</div>' +
+          '<div class="ach-card-desc">' + ach.desc + '</div>';
+        card.addEventListener('click', () => handleCardClick(card, ach));
+        grid.appendChild(card);
+      });
+
+      section.appendChild(titleEl);
+      section.appendChild(grid);
+      awCategories.appendChild(section);
+    });
+
+    achievementCardsBuilt = true;
+  }
+
+  // 同步卡片解锁状态 (轻量，不重建DOM)
+  function syncAchievementCards(unlockedIds) {
+    const unlockedSet = new Set(unlockedIds);
+    const cards = awCategories.querySelectorAll('.ach-card');
+    cards.forEach(card => {
+      const achId = card.getAttribute('data-ach-id');
+      const shouldUnlock = unlockedSet.has(achId);
+      const currentlyUnlocked = card.classList.contains('unlocked');
+      if (shouldUnlock && !currentlyUnlocked) {
+        card.classList.remove('locked');
+        card.classList.add('unlocked');
+        const lockEl = card.querySelector('.ach-card-lock');
+        const checkEl = card.querySelector('.ach-card-check');
+        if (lockEl) lockEl.style.display = 'none';
+        if (checkEl) checkEl.style.display = 'block';
+      }
+    });
+  }
+
+  // ============================================================
+  // 成就系统 - 卡片点击处理
+  // ============================================================
+  function handleCardClick(card, ach) {
+    const unlockedIds = loadUnlockedIds();
+
+    if (unlockedIds.includes(ach.id)) {
+      // 已解锁：轻微弹性反馈
+      card.style.transition = 'transform 0.15s cubic-bezier(0.34,1.56,0.64,1)';
+      card.style.transform = 'scale(1.06)';
+      setTimeout(() => {
+        card.style.transform = '';
+      }, 150);
+    } else {
+      // 未解锁：执行解锁流程
+      unlockAchievement(card, ach, unlockedIds);
+    }
+  }
+
+  // ============================================================
+  // 成就系统 - 解锁成就
+  // ============================================================
+  function unlockAchievement(card, ach, unlockedIds) {
+    if (card.classList.contains('unlocking')) return;
+
+    playUnlockSound();
+    showUnlockToast(card);
+
+    card.classList.add('unlocking');
+    card.classList.remove('locked');
+
+    setTimeout(() => {
+      card.classList.remove('unlocking');
+      card.classList.add('unlocked');
+      const lockEl = card.querySelector('.ach-card-lock');
+      const checkEl = card.querySelector('.ach-card-check');
+      if (lockEl) lockEl.style.display = 'none';
+      if (checkEl) checkEl.style.display = 'block';
+    }, 650);
+
+    unlockedIds.push(ach.id);
+    saveUnlockedIds(unlockedIds);
+    updateProfilePanel(unlockedIds);
+  }
+
+  // ============================================================
+  // 成就系统 - "成就解锁！"浮动提示
+  // ============================================================
+  function showUnlockToast(cardElement) {
+    const rect = cardElement.getBoundingClientRect();
+    const toast = document.createElement('div');
+    toast.className = 'unlock-toast';
+    toast.textContent = '成就解锁！';
+    toast.style.left = (rect.left + rect.width / 2) + 'px';
+    toast.style.top = (rect.top + rect.height / 2) + 'px';
+    document.body.appendChild(toast);
+
+    // 动画结束后移除元素
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 1700);
+  }
+
+  // ============================================================
+  // 成就系统 - 视图切换
+  // ============================================================
+  function showAchievementWall() {
+    const unlockedIds = loadUnlockedIds();
+    buildAchievementCards();        // 首次调用构建DOM，后续跳过
+    syncAchievementCards(unlockedIds); // 轻量同步解锁状态
+    updateProfilePanel(unlockedIds);
+    switchAchievementTab('daily');     // 默认选中"日常"选项卡
+
+    achievementWall.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    achievementWall.scrollTop = 0;
+  }
+
+  function hideAchievementWall() {
+    achievementWall.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  // ============================================================
+  // 成就系统 - 事件绑定
+  // ============================================================
+  enterHallBtn.addEventListener('click', showAchievementWall);
+  awBackBtn.addEventListener('click', hideAchievementWall);
+
+  // ESC 键返回终端
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && achievementWall.classList.contains('active')) {
+      hideAchievementWall();
+    }
+  });
+
+  // ============================================================
+  // 成就系统 - 初始化
+  // ============================================================
+  function initAchievements() {
+    buildAchievementCards();
+    const unlockedIds = loadUnlockedIds();
+    syncAchievementCards(unlockedIds);
+    updateProfilePanel(unlockedIds);
+  }
+
+  // DOM 就绪后启动
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  // 在 init 完成后额外初始化成就系统
+  // (init 是同步的，成就系统初始化可紧随其后；渲染循环已启动)
+  // ============================================================
+	  // 成就系统 - 选项卡切换
+	  // ============================================================
+	  function switchAchievementTab(tabKey) {
+	    document.querySelectorAll('.aw-tab-btn').forEach(btn => {
+	      btn.classList.toggle('active', btn.getAttribute('data-tab') === tabKey);
+	    });
+	    document.querySelectorAll('.aw-category').forEach(cat => {
+	      cat.style.display = cat.getAttribute('data-cat') === tabKey ? '' : 'none';
+	    });
+	  }
+
+	  // 绑定选项卡点击事件 (在 DOM 就绪后执行)
+	  function bindTabEvents() {
+	    document.querySelectorAll('.aw-tab-btn').forEach(btn => {
+	      btn.addEventListener('click', () => {
+	        switchAchievementTab(btn.getAttribute('data-tab'));
+	      });
+	    });
+	  }
+
+	  // 扩展 updateProfilePanel：同时更新选项卡按钮中的分类计数
+	  const _updateProfilePanelOrig = updateProfilePanel;
+	  updateProfilePanel = function(unlockedIds) {
+	    _updateProfilePanelOrig(unlockedIds);
+	    // 更新选项卡按钮中的分类计数
+	    ACHIEVEMENT_CATEGORIES.forEach(cat => {
+	      const tabBtn = document.querySelector('.aw-tab-btn[data-tab="' + cat.key + '"]');
+	      if (tabBtn) {
+	        const countSpan = tabBtn.querySelector('.aw-tab-count');
+	        if (countSpan) {
+	          const unlockedInCat = cat.ids.filter(id => unlockedIds.includes(id)).length;
+	          countSpan.textContent = unlockedInCat + '/' + cat.ids.length;
+	        }
+	      }
+	    });
+	  };
+
+  initAchievements();
+
+	  // 绑定选项卡事件并默认选中"日常"
+	  bindTabEvents();
+	  switchAchievementTab('daily');
+
+
+})();
+</script>
+</body>
+</html>

@@ -51,13 +51,9 @@
 git clone git@github.com:changmengyue/earth_online.git
 ```
 
-然后直接用浏览器打开仓库中的网页文件即可：
+在线直接体验：**https://changmengyue.github.io/earth_online/**
 
-```
-earth-online1.1.html
-```
-
-也可以拖拽到浏览器窗口，或在文件管理器里双击。
+本地打开：克隆后双击仓库根目录的 `index.html` 即可（零依赖、零构建，不需要联网），也可以拖拽到浏览器窗口。
 
 > 提示：解锁进度保存在浏览器 `localStorage` 中，关闭页面不会丢失；清除浏览器数据会一并清空。
 
@@ -201,7 +197,8 @@ earth-online1.1.html
 
 ```text
 earth_online/
-├── earth-online1.1.html   # 全部内容：样式 + 结构 + 逻辑（单文件，约 2091 行）
+├── index.html             # 全部内容：样式 + 结构 + 逻辑（单文件，约 2091 行）
+├── LICENSE                # MIT
 ├── README.md              # 本文件
 └── .git/
 ```
@@ -229,9 +226,9 @@ earth_online/
 | 1.2 | 功能与文案定型，**即仓库当前收录的版本** |
 | 1.2c / 1.2g | 在 1.2 基础上的个性化变体（标题与顶部提示语改为面向具体对象） |
 
-仓库当前收录的 `earth-online1.1.html`，其**代码内容与迭代序列中的 1.2 阶段完全一致**——是未做任何个性化处理、可直接对外分享的通用版本。
+仓库当前收录的 `index.html`（原 `earth-online1.1.html`），其**代码内容与迭代序列中的 1.2 阶段完全一致**——是未做任何个性化处理、可直接对外分享的通用版本。
 
-> 关于文件名的说明：文件名为 `earth-online1.1.html`，但内容对应 1.2 阶段。仓库保留了这个文件名以沿用既有标签，**内容以实际文件为准**。后续若需要，可考虑更名为 `index.html` 等更中性的名字以同步开启 GitHub Pages。
+> 关于文件名的说明：文件原名 `earth-online1.1.html`（内容对应 1.2 阶段），为开启 GitHub Pages 已更名为 `index.html`；历史标签仍按 1.1 / 1.2 的阶段称呼，**内容以实际文件为准**。
 
 ---
 
@@ -247,11 +244,11 @@ earth_online/
 
 ## License
 
-本项目**未指定开源协议**，著作权归作者所有。
+本项目基于 **MIT License** 开源，详见 [LICENSE](LICENSE)。
 
-代码公开用于**查看与个人学习交流**；在未获得作者书面许可前，请勿用于商业用途，或以修改后的版本对外发布。
-
-如需其他授权方式，欢迎通过下方方式联系作者。
+```
+Copyright (c) 2026 changmengyue
+```
 
 ---
 
